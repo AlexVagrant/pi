@@ -312,6 +312,14 @@ async function streamAssistantResponse(
 
 	for await (const event of response) {
 		switch (event.type) {
+			// STUDY: Streaming partial overlay pattern - the same assistant message
+			// is built incrementally through the stream lifecycle:
+			//   start  -> push a placeholder (partial) into context.messages
+			//   delta -> overwrite context.messages[last] with updated partial
+			//   done   -> overwrite context.messages[last] with final version
+			// This ensures context.messages always has exactly one entry for this
+			// assistant turn. Pushing would leave a stale partial + final duplicate
+			// in the conversation history, corrupting the LLM's view of the dialog.
 			case "start":
 				partialMessage = event.partial;
 				context.messages.push(partialMessage);
@@ -319,6 +327,8 @@ async function streamAssistantResponse(
 				await emit({ type: "message_start", message: { ...partialMessage } });
 				break;
 
+			// Overwrite the partial placeholder in-place with updated content.
+			// Same assistant message, still building; no new entry in the array.
 			case "text_start":
 			case "text_delta":
 			case "text_end":
@@ -339,6 +349,15 @@ async function streamAssistantResponse(
 				}
 				break;
 
+			// STUDY: Normal completion path - stream emitted an explicit "done"
+			// (or "error") event. This is the typical path for well-behaved
+			// providers (OpenAI, Anthropic, etc.).
+			//
+			// Two sub-cases for updating context.messages:
+			//   addedPartial=true  -> partial was pushed at "start", overwrite it
+			//   addedPartial=false -> no "start" event, push the final message now
+			//                          (some providers skip "start" and go straight
+			//                          to deltas)
 			case "done":
 			case "error": {
 				const finalMessage = await response.result();
@@ -356,6 +375,11 @@ async function streamAssistantResponse(
 		}
 	}
 
+	// STUDY: Fallback path - the for-await loop exhausted without hitting
+	// "done" or "error". Some providers close the stream after the last
+	// delta without an explicit terminal event. We still call result() to
+	// get the final message and return it, so the agent doesn't hang.
+	// The same overlay-or-push logic applies as in the "done"/"error" branch.
 	const finalMessage = await response.result();
 	if (addedPartial) {
 		context.messages[context.messages.length - 1] = finalMessage;
