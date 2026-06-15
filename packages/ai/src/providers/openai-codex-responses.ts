@@ -20,7 +20,6 @@ if (typeof process !== "undefined" && (process.versions?.node || process.version
 	});
 }
 
-import { getEnvApiKey } from "../env-api-keys.ts";
 import { clampThinkingLevel } from "../models.ts";
 import { registerSessionResourceCleanup } from "../session-resources.ts";
 import type {
@@ -54,7 +53,9 @@ const JWT_CLAIM_PATH = "https://api.openai.com/auth" as const;
 const DEFAULT_MAX_RETRIES = 0;
 const BASE_DELAY_MS = 1000;
 const DEFAULT_MAX_RETRY_DELAY_MS = 60_000;
-const DEFAULT_SSE_HEADER_TIMEOUT_MS = 10_000;
+// Keep a bounded pre-header timeout so zero-event Codex SSE stalls fail instead of
+// leaving callers stuck on "Working..." indefinitely. See #4945.
+const DEFAULT_SSE_HEADER_TIMEOUT_MS = 20_000;
 const DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS = 15_000;
 const CODEX_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
 const WEBSOCKET_MESSAGE_TOO_BIG_CLOSE_CODE = 1009;
@@ -219,7 +220,7 @@ export const streamOpenAICodexResponses: StreamFunction<"openai-codex-responses"
 		};
 
 		try {
-			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
+			const apiKey = options?.apiKey;
 			if (!apiKey) {
 				throw new Error(`No API key for provider: ${model.provider}`);
 			}
@@ -410,7 +411,7 @@ export const streamSimpleOpenAICodexResponses: StreamFunction<"openai-codex-resp
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
-	const apiKey = options?.apiKey || getEnvApiKey(model.provider);
+	const apiKey = options?.apiKey;
 	if (!apiKey) {
 		throw new Error(`No API key for provider: ${model.provider}`);
 	}
@@ -544,7 +545,7 @@ async function processStream(
 	model: Model<"openai-codex-responses">,
 	options?: OpenAICodexResponsesOptions,
 ): Promise<void> {
-	await processResponsesStream(mapCodexEvents(parseSSE(response)), output, stream, model, {
+	await processResponsesStream(mapCodexEvents(parseSSE(response, options?.signal)), output, stream, model, {
 		serviceTier: options?.serviceTier,
 		resolveServiceTier: resolveCodexServiceTier,
 		applyServiceTierPricing: (usage, serviceTier) => applyServiceTierPricing(usage, serviceTier, model),
@@ -622,16 +623,26 @@ function normalizeCodexStatus(status: unknown): CodexResponseStatus | undefined 
 // SSE Parsing
 // ============================================================================
 
-async function* parseSSE(response: Response): AsyncGenerator<Record<string, unknown>> {
+async function* parseSSE(response: Response, signal?: AbortSignal): AsyncGenerator<Record<string, unknown>> {
 	if (!response.body) return;
 
 	const reader = response.body.getReader();
 	const decoder = new TextDecoder();
 	let buffer = "";
+	const onAbort = () => {
+		void reader.cancel().catch(() => {});
+	};
+	signal?.addEventListener("abort", onAbort, { once: true });
 
 	try {
 		while (true) {
+			if (signal?.aborted) {
+				throw new Error("Request was aborted");
+			}
 			const { done, value } = await reader.read();
+			if (signal?.aborted) {
+				throw new Error("Request was aborted");
+			}
 			if (done) break;
 			buffer += decoder.decode(value, { stream: true });
 
@@ -661,6 +672,7 @@ async function* parseSSE(response: Response): AsyncGenerator<Record<string, unkn
 			}
 		}
 	} finally {
+		signal?.removeEventListener("abort", onAbort);
 		try {
 			await reader.cancel();
 		} catch {}

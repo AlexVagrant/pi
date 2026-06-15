@@ -1,7 +1,9 @@
 // Core session management
 
+export { type Args, parseArgs } from "./cli/args.ts";
+
 // Config paths
-export { getAgentDir, VERSION } from "./config.ts";
+export { getAgentDir, getDocsPath, getExamplesPath, getPackageDir, getReadmePath, VERSION } from "./config.ts";
 export {
 	AgentSession,
 	type AgentSessionConfig,
@@ -96,6 +98,11 @@ export type {
 	LsToolCallEvent,
 	MessageRenderer,
 	MessageRenderOptions,
+	ProjectTrustContext,
+	ProjectTrustEvent,
+	ProjectTrustEventDecision,
+	ProjectTrustEventResult,
+	ProjectTrustHandler,
 	ProviderConfig,
 	ProviderModelConfig,
 	ReadToolCallEvent,
@@ -213,10 +220,12 @@ export {
 } from "./core/session-manager.ts";
 export {
 	type CompactionSettings,
+	type DefaultProjectTrust,
 	type ImageSettings,
 	type PackageSource,
 	type RetrySettings,
 	SettingsManager,
+	type SettingsManagerCreateOptions,
 } from "./core/settings-manager.ts";
 // Skills
 export {
@@ -279,6 +288,13 @@ export {
 	type WriteToolOptions,
 	withFileMutationQueue,
 } from "./core/tools/index.ts";
+export {
+	hasTrustRequiringProjectResources,
+	type ProjectTrustDecision,
+	ProjectTrustStore,
+	type ProjectTrustStoreEntry,
+	type ProjectTrustUpdate,
+} from "./core/trust-manager.ts";
 // Main entry point
 export { type MainOptions, main } from "./main.ts";
 // Run modes for programmatic SDK usage
@@ -291,6 +307,8 @@ export {
 	type RpcClientOptions,
 	type RpcCommand,
 	type RpcEventListener,
+	type RpcExtensionUIRequest,
+	type RpcExtensionUIResponse,
 	type RpcResponse,
 	type RpcSessionState,
 	runPrintMode,
@@ -349,6 +367,7 @@ export {
 // Clipboard utilities
 export { copyToClipboard } from "./utils/clipboard.ts";
 export { parseFrontmatter, stripFrontmatter } from "./utils/frontmatter.ts";
+export { convertToPng } from "./utils/image-convert.ts";
 export { formatDimensionNote, type ResizedImage, resizeImage } from "./utils/image-resize.ts";
 // Shell utilities
 export { getShellConfig } from "./utils/shell.ts";

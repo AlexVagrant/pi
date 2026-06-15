@@ -1,6 +1,5 @@
 import OpenAI from "openai";
 import type { ResponseCreateParamsStreaming } from "openai/resources/responses/responses.js";
-import { getEnvApiKey } from "../env-api-keys.ts";
 import { clampThinkingLevel } from "../models.ts";
 import type {
 	Api,
@@ -40,6 +39,7 @@ function resolveCacheRetention(cacheRetention?: CacheRetention): CacheRetention 
 
 function getCompat(model: Model<"openai-responses">): Required<OpenAIResponsesCompat> {
 	return {
+		supportsDeveloperRole: model.compat?.supportsDeveloperRole ?? true,
 		sendSessionIdHeader: model.compat?.sendSessionIdHeader ?? true,
 		supportsLongCacheRetention: model.compat?.supportsLongCacheRetention ?? true,
 	};
@@ -107,7 +107,10 @@ export const streamOpenAIResponses: StreamFunction<"openai-responses", OpenAIRes
 
 		try {
 			// Create OpenAI client
-			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
+			const apiKey = options?.apiKey;
+			if (!apiKey) {
+				throw new Error(`No API key for provider: ${model.provider}`);
+			}
 			const cacheRetention = resolveCacheRetention(options?.cacheRetention);
 			const cacheSessionId = cacheRetention === "none" ? undefined : options?.sessionId;
 			const client = createClient(model, context, apiKey, options?.headers, cacheSessionId);
@@ -161,7 +164,7 @@ export const streamSimpleOpenAIResponses: StreamFunction<"openai-responses", Sim
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
-	const apiKey = options?.apiKey || getEnvApiKey(model.provider);
+	const apiKey = options?.apiKey;
 	if (!apiKey) {
 		throw new Error(`No API key for provider: ${model.provider}`);
 	}
@@ -179,19 +182,10 @@ export const streamSimpleOpenAIResponses: StreamFunction<"openai-responses", Sim
 function createClient(
 	model: Model<"openai-responses">,
 	context: Context,
-	apiKey?: string,
+	apiKey: string,
 	optionsHeaders?: Record<string, string>,
 	sessionId?: string,
 ) {
-	if (!apiKey) {
-		if (!process.env.OPENAI_API_KEY) {
-			throw new Error(
-				"OpenAI API key is required. Set OPENAI_API_KEY environment variable or pass it as an argument.",
-			);
-		}
-		apiKey = process.env.OPENAI_API_KEY;
-	}
-
 	const compat = getCompat(model);
 	const headers = { ...model.headers };
 	if (model.provider === "github-copilot") {

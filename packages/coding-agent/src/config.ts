@@ -109,19 +109,27 @@ function getSelfUpdateCommandForMethod(
 	switch (method) {
 		case "bun-binary":
 			return undefined;
-		case "pnpm":
+		case "pnpm": {
+			const match = readCommandOutput("pnpm", ["root", "-g"])
+				? undefined
+				: /^(.*[\\/]global[\\/][^\\/]+)[\\/]\.pnpm[\\/]/.exec(getPackageDir());
+			const binDirArgs = match
+				? [`--config.global-bin-dir=${process.env.PNPM_HOME || dirname(dirname(match[1]))}`]
+				: [];
 			return makeSelfUpdateCommand(
 				makeSelfUpdateCommandStep("pnpm", [
 					"install",
 					"-g",
 					"--ignore-scripts",
 					"--config.minimumReleaseAge=0",
+					...binDirArgs,
 					updatePackageName,
 				]),
 				updatePackageName === installedPackageName
 					? undefined
-					: makeSelfUpdateCommandStep("pnpm", ["remove", "-g", installedPackageName]),
+					: makeSelfUpdateCommandStep("pnpm", ["remove", "-g", ...binDirArgs, installedPackageName]),
 			);
+		}
 		case "yarn":
 			return makeSelfUpdateCommand(
 				makeSelfUpdateCommandStep("yarn", ["global", "add", "--ignore-scripts", updatePackageName]),
@@ -205,7 +213,9 @@ function getGlobalPackageRoots(method: InstallMethod, _packageName: string, npmC
 		}
 		case "pnpm": {
 			const root = readCommandOutput("pnpm", ["root", "-g"]);
-			return root ? [root, dirname(root)] : [];
+			if (root) return [root, dirname(root)];
+			const match = /^(.*[\\/]global[\\/][^\\/]+)[\\/]\.pnpm[\\/]/.exec(getPackageDir());
+			return match ? [match[1]] : [];
 		}
 		case "yarn": {
 			const dir = readCommandOutput("yarn", ["global", "dir"]);
@@ -452,7 +462,13 @@ interface PackageJson {
 	};
 }
 
-const pkg = JSON.parse(readFileSync(getPackageJsonPath(), "utf-8")) as PackageJson;
+let pkg: PackageJson = {};
+try {
+	pkg = JSON.parse(readFileSync(getPackageJsonPath(), "utf-8")) as PackageJson;
+} catch (e: unknown) {
+	const err = e as NodeJS.ErrnoException;
+	if (err.code !== "ENOENT") throw e;
+}
 
 const piConfigName: string | undefined = pkg.piConfig?.name;
 export const PACKAGE_NAME: string = pkg.name || "@earendil-works/pi-coding-agent";
